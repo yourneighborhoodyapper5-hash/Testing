@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ollama Web UI via Cloudflare</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 20px auto; padding: 0 10px; }
+        .config-panel { background: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .config-panel input, .config-panel select { display: block; width: 100%; margin: 10px 0; padding: 8px; box-sizing: border-box; }
+        #chat-box { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; border-radius: 5px; background: #fafafa; }
+        .message { margin-bottom: 10px; padding: 8px; border-radius: 5px; }
+        .user { background: #e3f2fd; text-align: right; }
+        .ai { background: #f5f5f5; text-align: left; }
+        .input-area { display: flex; gap: 10px; }
+        .input-area input { flex-grow: 1; padding: 10px; }
+        .input-area button { padding: 10px 20px; }
+    </style>
+</head>
+<body>
+
+    <h2>Ollama Cloudflare Proxy Client</h2>
+
+    <!-- Configuration Panel -->
+    <div class="config-panel">
+        <label>Cloudflare Worker URL:</label>
+        <input type="text" id="workerUrl" placeholder="https://workers.dev">
+        
+        <label>API Bearer Key:</label>
+        <input type="password" id="apiKey" placeholder="Enter your custom secret token">
+        
+        <button onclick="fetchModels()">Load Models</button>
+        
+        <label>Select Model:</label>
+        <select id="modelSelect">
+            <option value="">-- Load models first --</option>
+        </select>
+    </div>
+
+    <!-- Chat Interface -->
+    <div id="chat-box"></div>
+    
+    <div class="input-area">
+        <input type="text" id="userInput" placeholder="Type your message here..." onkeydown="if(event.key === 'Enter') sendMessage()">
+        <button onclick="sendMessage()">Send</button>
+    </div>
+
+    <script>
+        // Helper function to generate standard headers
+        function getHeaders() {
+            const apiKey = document.getElementById('apiKey').value;
+            return {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            };
+        }
+
+        // 1. Fetch Model List (/api/tags)
+        async function fetchModels() {
+            const workerUrl = document.getElementById('workerUrl').value.replace(/\/\$/, "");
+            const modelSelect = document.getElementById('modelSelect');
+            
+            try {
+                const response = await fetch(`${workerUrl}/api/tags`, {
+                    method: 'GET',
+                    headers: getHeaders()
+                });
+                
+                if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+                
+                const data = await response.json();
+                modelSelect.innerHTML = ''; // Clear options
+                
+                data.models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.name;
+                    option.textContent = model.name;
+                    modelSelect.appendChild(option);
+                });
+            } catch (error) {
+                alert('Failed to fetch models. Check your URL, Key, or CORS settings. ' + error.message);
+            }
+        }
+
+        // 2. Send Chat Request (/api/generate)
+        async function sendMessage() {
+            const workerUrl = document.getElementById('workerUrl').value.replace(/\/\$/, "");
+            const model = document.getElementById('modelSelect').value;
+            const userInput = document.getElementById('userInput');
+            const chatBox = document.getElementById('chat-box');
+            
+            if (!model) return alert('Please select a model first.');
+            if (!userInput.value.trim()) return;
+
+            // Append user message to UI
+            const userText = userInput.value;
+            chatBox.innerHTML += `<div class="message user">${userText}</div>`;
+            userInput.value = '';
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            // Create placeholder for AI response
+            const aiMessageDiv = document.createElement('div');
+            aiMessageDiv.className = 'message ai';
+            aiMessageDiv.textContent = 'Thinking...';
+            chatBox.appendChild(aiMessageDiv);
+
+            try {
+                const response = await fetch(`${workerUrl}/api/generate`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        model: model,
+                        prompt: userText,
+                        stream: false // Set to false for simple implementation
+                    })
+                });
+
+                if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+                
+                const data = await response.json();
+                aiMessageDiv.textContent = data.response;
+            } catch (error) {
+                aiMessageDiv.textContent = 'Error: Could not retrieve answer. ' + error.message;
+            }
+            
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    </script>
+</body>
+</html>
